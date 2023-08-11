@@ -42,6 +42,56 @@ impl HttpDate {
             && self.year <= 9999
             && &HttpDate::from(SystemTime::from(*self)) == self
     }
+
+    pub(crate) fn format(self, buffer: &mut [u8; 29]) {
+        let wday = match self.wday {
+            1 => b"Mon",
+            2 => b"Tue",
+            3 => b"Wed",
+            4 => b"Thu",
+            5 => b"Fri",
+            6 => b"Sat",
+            7 => b"Sun",
+            _ => unreachable!(),
+        };
+
+        let month = match self.mon {
+            1 => b"Jan",
+            2 => b"Feb",
+            3 => b"Mar",
+            4 => b"Apr",
+            5 => b"May",
+            6 => b"Jun",
+            7 => b"Jul",
+            8 => b"Aug",
+            9 => b"Sep",
+            10 => b"Oct",
+            11 => b"Nov",
+            12 => b"Dec",
+            _ => unreachable!(),
+        };
+
+        *buffer = *b"   , 00     0000 00:00:00 GMT";
+
+        buffer[0] = wday[0];
+        buffer[1] = wday[1];
+        buffer[2] = wday[2];
+        buffer[5] = b'0' + (self.day / 10) as u8;
+        buffer[6] = b'0' + (self.day % 10) as u8;
+        buffer[8] = month[0];
+        buffer[9] = month[1];
+        buffer[10] = month[2];
+        buffer[12] = b'0' + (self.year / 1000) as u8;
+        buffer[13] = b'0' + (self.year / 100 % 10) as u8;
+        buffer[14] = b'0' + (self.year / 10 % 10) as u8;
+        buffer[15] = b'0' + (self.year % 10) as u8;
+        buffer[17] = b'0' + (self.hour / 10) as u8;
+        buffer[18] = b'0' + (self.hour % 10) as u8;
+        buffer[20] = b'0' + (self.min / 10) as u8;
+        buffer[21] = b'0' + (self.min % 10) as u8;
+        buffer[23] = b'0' + (self.sec / 10) as u8;
+        buffer[24] = b'0' + (self.sec % 10) as u8;
+    }
 }
 
 impl From<SystemTime> for HttpDate {
@@ -178,52 +228,8 @@ impl FromStr for HttpDate {
 
 impl Display for HttpDate {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let wday = match self.wday {
-            1 => b"Mon",
-            2 => b"Tue",
-            3 => b"Wed",
-            4 => b"Thu",
-            5 => b"Fri",
-            6 => b"Sat",
-            7 => b"Sun",
-            _ => unreachable!(),
-        };
-
-        let mon = match self.mon {
-            1 => b"Jan",
-            2 => b"Feb",
-            3 => b"Mar",
-            4 => b"Apr",
-            5 => b"May",
-            6 => b"Jun",
-            7 => b"Jul",
-            8 => b"Aug",
-            9 => b"Sep",
-            10 => b"Oct",
-            11 => b"Nov",
-            12 => b"Dec",
-            _ => unreachable!(),
-        };
-
-        let mut buf: [u8; 29] = *b"   , 00     0000 00:00:00 GMT";
-        buf[0] = wday[0];
-        buf[1] = wday[1];
-        buf[2] = wday[2];
-        buf[5] = b'0' + (self.day / 10) as u8;
-        buf[6] = b'0' + (self.day % 10) as u8;
-        buf[8] = mon[0];
-        buf[9] = mon[1];
-        buf[10] = mon[2];
-        buf[12] = b'0' + (self.year / 1000) as u8;
-        buf[13] = b'0' + (self.year / 100 % 10) as u8;
-        buf[14] = b'0' + (self.year / 10 % 10) as u8;
-        buf[15] = b'0' + (self.year % 10) as u8;
-        buf[17] = b'0' + (self.hour / 10) as u8;
-        buf[18] = b'0' + (self.hour % 10) as u8;
-        buf[20] = b'0' + (self.min / 10) as u8;
-        buf[21] = b'0' + (self.min % 10) as u8;
-        buf[23] = b'0' + (self.sec / 10) as u8;
-        buf[24] = b'0' + (self.sec % 10) as u8;
+        let mut buf = [0u8; 29];
+        self.format(&mut buf);
         f.write_str(std::str::from_utf8(&buf[..]).unwrap())
     }
 }

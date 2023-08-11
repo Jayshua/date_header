@@ -61,6 +61,16 @@ pub fn fmt_http_date(d: SystemTime) -> String {
     format!("{}", HttpDate::from(d))
 }
 
+
+/// Format a date to be used in a HTTP header field into the provided buffer.
+///
+/// Dates are formatted as IMF-fixdate: `Fri, 15 May 2015 15:34:21 GMT`.
+/// This is a fixed-width format, so this function will always overwrite
+/// the entire buffer and never allocate.
+pub fn fmt_http_date_into(d: SystemTime, buffer: &mut [u8; 29]) {
+    HttpDate::from(d).format(buffer);
+}
+
 #[cfg(test)]
 mod tests {
     use std::str;
