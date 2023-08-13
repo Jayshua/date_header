@@ -1,16 +1,18 @@
 [package]
-name = "httpdate"
-version = "1.0.2"
-authors = ["Pyfisch <pyfisch@posteo.org>"]
+name = "date_header"
+version = "1.0.3"
+authors = ["Jayshua Nelson <me@jayshuanelson.com>"]
 license = "MIT/Apache-2.0"
 description = "HTTP date parsing and formatting"
 keywords = ["http", "date", "time", "simple", "timestamp"]
 readme = "README.md"
-repository = "https://github.com/pyfisch/httpdate"
+repository = "https://github.com/jayshua/http-date-header"
 edition = "2021"
 
 [dev-dependencies]
 criterion = "0.3.5"
+proptest = "1.2.0"
+regex = "1.9.3"
 
 [[bench]]
 name = "benchmarks"

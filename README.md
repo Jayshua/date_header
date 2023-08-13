@@ -24,4 +24,3 @@ using the display impl avoids a temporary allocation.
 Read the [blog post](https://pyfisch.org/blog/http-datetime-handling/) to learn
 more.
 
-Fuzz it by installing *cargo-fuzz* and running `cargo fuzz run fuzz_target_1`.

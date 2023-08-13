@@ -4,24 +4,18 @@
 //! For example a response created on May 15, 2015 may contain the header
 //! `Date: Fri, 15 May 2015 15:34:21 GMT`. Since the timestamp does not
 //! contain any timezone or leap second information it is equvivalent to
-//! writing 1431696861 Unix time. Rust’s `SystemTime` is used to store
-//! these timestamps.
+//! writing 1431696861 Unix time.
 //!
 //! This crate provides two public functions:
 //!
-//! * `parse_http_date` to parse a HTTP datetime string to a system time
-//! * `fmt_http_date` to format a system time to a IMF-fixdate
-//!
-//! In addition it exposes the `HttpDate` type that can be used to parse
-//! and format timestamps. Convert a sytem time to `HttpDate` and vice versa.
-//! The `HttpDate` (8 bytes) is smaller than `SystemTime` (16 bytes) and
-//! using the display impl avoids a temporary allocation.
+//! * `parse` to parse an HTTP datetime string to a unix timestamp
+//! * `format` to format a unix timestamp to a IMF-fixdate
 #![forbid(unsafe_code)]
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 
-// No alloc, no std, no panic, simplified version of httpdate
-
+// Unix timestamp for Jan 1st, 10000
+const YEAR_10000: u64 = 253402300800;
 
 
 /// Format a date to be used in a HTTP header field into the provided buffer.
@@ -31,9 +25,9 @@
 ///
 /// Since this is a fixed-width format, it does not support dates greater
 /// than year 9999.
-pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), FormatError> {
-    if secs_since_epoch >= 253402300800 {
-        return Err(FormatError::YearGreaterThan9999);
+pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), TooFuturistic> {
+    if secs_since_epoch >= YEAR_10000 {
+        return Err(TooFuturistic);
     }
 
     /* 2000-03-01 (mod 400 year, immediately after feb29 */
@@ -150,26 +144,8 @@ pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), Format
 }
 
 /// Errors that can be produced by the timestamp_to_date_header function
-pub enum FormatError {
-    /// The format used for the http Date header does not support years larger than 9999
-    YearGreaterThan9999,
-}
+pub struct TooFuturistic;
 
-#[cfg(test)]
-#[test]
-fn test_format() {
-    let mut buffer = [0u8; 29];
-
-    let tests = [
-        (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
-        (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
-    ];
-
-    for (timestamp, formatted) in tests {
-        assert!(format(timestamp, &mut buffer).is_ok(), "{timestamp} formats successfully");
-        assert_eq!(&buffer, formatted.as_bytes(), "{timestamp} formats as {formatted}");
-    }
-}
 
 
 
@@ -234,8 +210,15 @@ pub fn parse(header: &[u8]) -> Result<u64, ParseError> {
     Ok(timestamp)
 }
 
+/// Error returned from the `parse` function indicating that the input text was not valid.
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParseError;
+
+
+
+
+
+
 
 
 
@@ -417,42 +400,133 @@ fn parse_asctime(s: &[u8]) -> Result<HttpDate, ParseError> {
 }
 
 
+
+
 #[cfg(test)]
-#[test]
-fn test_parse() {
-    let success = [
-        (784111777, "Sun, 06 Nov 1994 08:49:37 GMT"),
-        (784111777, "Sunday, 06-Nov-94 08:49:37 GMT"),
-        (784111777, "Sun Nov  6 08:49:37 1994"),
-        (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
-    ];
-    for (timestamp, formatted) in success {
-        assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "{timestamp} is the parse of {formatted}");
+mod test {
+    use proptest::prelude::*;
+    use crate::*;
+
+
+    #[cfg(test)]
+    #[test]
+    fn test_format_static() {
+        let mut buffer = [0u8; 29];
+
+        let tests = [
+            (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
+            (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
+        ];
+
+        for (timestamp, formatted) in tests {
+            assert!(format(timestamp, &mut buffer).is_ok(), "{timestamp} formats successfully");
+            assert_eq!(&buffer, formatted.as_bytes(), "{timestamp} formats as {formatted}");
+        }
     }
 
-    let fail = [
-        "Sun Nov 10 08:00:00 1000",
-        "Sun Nov 10 08*00:00 2000",
-        "Sunday, 06-Nov-94 08+49:37 GMT",
-    ];
-    for formatted in fail {
-        assert_eq!(parse(formatted.as_bytes()), Err(ParseError), "{formatted} fails to parse");
+
+    #[test]
+    fn test_parse_static() {
+        let success = [
+            (784111777, "Sun, 06 Nov 1994 08:49:37 GMT"),
+            (784111777, "Sunday, 06-Nov-94 08:49:37 GMT"),
+            (784111777, "Sun Nov  6 08:49:37 1994"),
+            (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
+        ];
+        for (timestamp, formatted) in success {
+            assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "{timestamp} is the parse of {formatted}");
+        }
+
+        let fail = [
+            "Sun Nov 10 08:00:00 1000",
+            "Sun Nov 10 08*00:00 2000",
+            "Sunday, 06-Nov-94 08+49:37 GMT",
+        ];
+        for formatted in fail {
+            assert_eq!(parse(formatted.as_bytes()), Err(ParseError), "{formatted} fails to parse");
+        }
+
+        let rolling = [
+            (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
+            (3600, "Thu, 01 Jan 1970 01:00:00 GMT"),
+            (86400, "Fri, 02 Jan 1970 01:00:00 GMT"),
+            (2592000, "Sun, 01 Feb 1970 01:00:00 GMT"),
+            (2592000, "Tue, 03 Mar 1970 01:00:00 GMT"),
+            (31536005, "Wed, 03 Mar 1971 01:00:05 GMT"),
+            (15552000, "Mon, 30 Aug 1971 01:00:05 GMT"),
+            (6048000, "Mon, 08 Nov 1971 01:00:05 GMT"),
+            (864000000, "Fri, 26 Mar 1999 01:00:05 GMT"),
+        ];
+        let mut timestamp = 0;
+        for (add_amount, formatted) in rolling {
+            timestamp += add_amount;
+            assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "offset {add_amount} formats as {formatted}");
+        }
     }
 
-    let rolling = [
-        (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
-        (3600, "Thu, 01 Jan 1970 01:00:00 GMT"),
-        (86400, "Fri, 02 Jan 1970 01:00:00 GMT"),
-        (2592000, "Sun, 01 Feb 1970 01:00:00 GMT"),
-        (2592000, "Tue, 03 Mar 1970 01:00:00 GMT"),
-        (31536005, "Wed, 03 Mar 1971 01:00:05 GMT"),
-        (15552000, "Mon, 30 Aug 1971 01:00:05 GMT"),
-        (6048000, "Mon, 08 Nov 1971 01:00:05 GMT"),
-        (864000000, "Fri, 26 Mar 1999 01:00:05 GMT"),
-    ];
-    let mut timestamp = 0;
-    for (add_amount, formatted) in rolling {
-        timestamp += add_amount;
-        assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "offset {add_amount} formats as {formatted}");
+
+    proptest! {
+        #[test]
+        fn test_imf_parse(
+            week_day in "(Sun|Mon|Tue|Wed|Thu|Fri|Sat)",
+            day in 1..=31,
+            month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+            year in 1970..=9999,
+            hour in 0..=23,
+            minute in 0..=59,
+            second in 0..=59,
+        ) {
+            let text = format!("{}, {:0>2} {} {} {:0>2}:{:0>2}:{:0>2} GMT", week_day, day, month, year, hour, minute, second);
+            let result = parse(text.as_bytes());
+            assert!(result.is_ok());
+            assert!(result.unwrap() < YEAR_10000);
+        }
+
+        #[test]
+        fn test_rfc850_parse(
+            week_day in "(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)",
+            day in 1..=31,
+            month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+            year in 70..=99,
+            hour in 0..=23,
+            minute in 0..=59,
+            second in 0..=59,
+        ) {
+            let text = format!("{}, {:0>2}-{}-{:0>2} {:0>2}:{:0>2}:{:0>2} GMT", week_day, day, month, year, hour, minute, second);
+            let result = parse(text.as_bytes());
+            assert!(result.is_ok());
+            assert!(result.unwrap() < YEAR_10000);
+        }
+
+        #[test]
+        // Example: `Sun Nov  6 08:49:37 1994`
+        fn test_asc_parse(
+            week_day in "(Sun|Mon|Tue|Wed|Thu|Fri|Sat)",
+            month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+            day in 1..=31,
+            year in 1970..=9999,
+            hour in 0..=23,
+            minute in 0..=59,
+            second in 0..=59,
+        ) {
+            let text = format!("{} {} {: >2} {:0>2}:{:0>2}:{:0>2} {}", week_day, month, day, hour, minute, second, year);
+            let result = parse(text.as_bytes());
+            assert!(result.is_ok());
+            assert!(result.unwrap() < YEAR_10000);
+        }
+
+        #[test]
+        fn test_format_props(timestamp in 0..YEAR_10000) {
+            let regex = regex::Regex::new(r"(Sun|Mon|Tue|Wed|Thu|Fri|Sat), [0-3]\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (19[7-9]\d|[2-9]\d{3}) ([0-2]\d):([0-5]\d):([0-5]\d) GMT")
+                .unwrap();
+            let mut buffer = [0; 29];
+            let result = format(timestamp, &mut buffer);
+            let str_buffer = std::str::from_utf8(&buffer).unwrap();
+            assert!(result.is_ok());
+            assert!(regex.is_match(str_buffer), "{}", str_buffer);
+
+            let parsed_timestamp = parse(&buffer).unwrap();
+            assert_eq!(timestamp, parsed_timestamp);
+        }
     }
 }
