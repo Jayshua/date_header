@@ -7,7 +7,7 @@
 const YEAR_10000: u64 = 253402300800;
 
 
-/// Format a date to be used in a HTTP header field into the provided buffer.
+/// Format a unix timestamp to be used in an HTTP header field into the provided buffer.
 ///
 /// Dates are formatted as IMF-fixdate: `Fri, 15 May 2015 15:34:21 GMT`.
 /// This is a fixed-width format, so this function will always overwrite the entire buffer.
@@ -132,7 +132,10 @@ pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), TooFut
     Ok(())
 }
 
-/// Errors that can be produced by the timestamp_to_date_header function
+/// Error returned from [format] indicating that the timestamp is too far into the future.
+///
+/// IMF-fixdate only supports days prior to the year 10000
+#[derive(Debug, Eq, PartialEq)]
 pub struct TooFuturistic;
 
 
@@ -141,13 +144,13 @@ pub struct TooFuturistic;
 
 
 
-
-
+/// Parse an HTTP date header into a u64 unix timestamp
+///
 /// Note that this function ignores the portion of the formatted text corresponding to the day of the week.
-/// e.g. the "Sun" in "Sun, 02 Oct 2016 14:44:11 GMT". This is usually fine as the week day is redundant
-/// information, the date also includes the day of the month. A different crate will be needed if you want
-/// to fully validate the date format.
-pub fn parse(header: &[u8]) -> Result<u64, ParseError> {
+/// e.g. the "Sun" in "Sun, 02 Oct 2016 14:44:11 GMT". This is usually fine because the week day is redundant
+/// information - the date is fully specified by the day-month-year components. A different crate will be
+/// needed if you want to fully validate the date format.
+pub fn parse(header: &[u8]) -> Result<u64, InvalidDate> {
     let date = parse_imf_fixdate(header)
         .or_else(|_| parse_rfc850_date(header))
         .or_else(|_| parse_asctime(header))?;
@@ -164,7 +167,7 @@ pub fn parse(header: &[u8]) -> Result<u64, ParseError> {
         && date.year <= 9999;
 
     if !is_valid {
-        return Err(ParseError);
+        return Err(InvalidDate);
     }
 
     let leap_years = ((date.year - 1) - 1968) / 4 - ((date.year - 1) - 1900) / 100 + ((date.year - 1) - 1600) / 400;
@@ -199,9 +202,9 @@ pub fn parse(header: &[u8]) -> Result<u64, ParseError> {
     Ok(timestamp)
 }
 
-/// Error returned from the `parse` function indicating that the input text was not valid.
+/// Error returned from [parse] indicating that the input text was not valid.
 #[derive(Debug, Eq, PartialEq)]
-pub struct ParseError;
+pub struct InvalidDate;
 
 
 
@@ -222,27 +225,27 @@ struct HttpDate {
 }
 
 
-fn toint_1(x: u8) -> Result<u8, ParseError> {
+fn toint_1(x: u8) -> Result<u8, InvalidDate> {
     let result = x.wrapping_sub(b'0');
     if result < 10 {
         Ok(result)
     } else {
-        Err(ParseError)
+        Err(InvalidDate)
     }
 }
 
-fn toint_2(s: &[u8]) -> Result<u8, ParseError> {
+fn toint_2(s: &[u8]) -> Result<u8, InvalidDate> {
     let high = s[0].wrapping_sub(b'0');
     let low = s[1].wrapping_sub(b'0');
 
     if high < 10 && low < 10 {
         Ok(high * 10 + low)
     } else {
-        Err(ParseError)
+        Err(InvalidDate)
     }
 }
 
-fn toint_4(s: &[u8]) -> Result<u16, ParseError> {
+fn toint_4(s: &[u8]) -> Result<u16, InvalidDate> {
     let a = u16::from(s[0].wrapping_sub(b'0'));
     let b = u16::from(s[1].wrapping_sub(b'0'));
     let c = u16::from(s[2].wrapping_sub(b'0'));
@@ -251,14 +254,14 @@ fn toint_4(s: &[u8]) -> Result<u16, ParseError> {
     if a < 10 && b < 10 && c < 10 && d < 10 {
         Ok(a * 1000 + b * 100 + c * 10 + d)
     } else {
-        Err(ParseError)
+        Err(InvalidDate)
     }
 }
 
 // Example: `Sun, 06 Nov 1994 08:49:37 GMT`
-fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, ParseError> {
+fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, InvalidDate> {
     if s.len() != 29 || &s[25..] != b" GMT" || s[16] != b' ' || s[19] != b':' || s[22] != b':' {
-        return Err(ParseError);
+        return Err(InvalidDate);
     }
 
     let date = HttpDate {
@@ -279,7 +282,7 @@ fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, ParseError> {
             b" Oct " => 10,
             b" Nov " => 11,
             b" Dec " => 12,
-            _ => return Err(ParseError),
+            _ => return Err(InvalidDate),
         },
         year: toint_4(&s[12..16])?,
     };
@@ -288,9 +291,9 @@ fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, ParseError> {
 }
 
 // Example: `Sunday, 06-Nov-94 08:49:37 GMT`
-fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, ParseError> {
+fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, InvalidDate> {
     if s.len() < 23 {
-        return Err(ParseError);
+        return Err(InvalidDate);
     }
 
     fn wday<'a>(s: &'a [u8], name: &'static [u8]) -> Option<&'a [u8]> {
@@ -308,10 +311,10 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, ParseError> {
         .or_else(|| wday(s, b"Friday, "))
         .or_else(|| wday(s, b"Saturday, "))
         .or_else(|| wday(s, b"Sunday, "))
-        .ok_or(ParseError)?;
+        .ok_or(InvalidDate)?;
 
     if s.len() != 22 || s[12] != b':' || s[15] != b':' || &s[18..22] != b" GMT" {
-        return Err(ParseError);
+        return Err(InvalidDate);
     }
 
     let mut year = u16::from(toint_2(&s[7..9])?);
@@ -339,7 +342,7 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, ParseError> {
             b"-Oct-" => 10,
             b"-Nov-" => 11,
             b"-Dec-" => 12,
-            _ => return Err(ParseError),
+            _ => return Err(InvalidDate),
         },
         year,
     };
@@ -348,9 +351,9 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, ParseError> {
 }
 
 // Example: `Sun Nov  6 08:49:37 1994`
-fn parse_asctime(s: &[u8]) -> Result<HttpDate, ParseError> {
+fn parse_asctime(s: &[u8]) -> Result<HttpDate, InvalidDate> {
     if s.len() != 24 || s[10] != b' ' || s[13] != b':' || s[16] != b':' || s[19] != b' ' {
-        return Err(ParseError);
+        return Err(InvalidDate);
     }
 
     let date = HttpDate {
@@ -380,7 +383,7 @@ fn parse_asctime(s: &[u8]) -> Result<HttpDate, ParseError> {
             b"Oct " => 10,
             b"Nov " => 11,
             b"Dec " => 12,
-            _ => return Err(ParseError),
+            _ => return Err(InvalidDate),
         },
         year: toint_4(&s[20..24])?,
     };
@@ -460,7 +463,7 @@ mod test {
         ];
 
         for formatted in fail {
-            assert_eq!(parse(formatted.as_bytes()), Err(ParseError), "{formatted} fails to parse");
+            assert_eq!(parse(formatted.as_bytes()), Err(InvalidDate), "{formatted} fails to parse");
         }
 
 
