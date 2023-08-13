@@ -1,15 +1,4 @@
-//! Date and time utils for HTTP.
-//!
-//! Multiple HTTP header fields store timestamps.
-//! For example a response created on May 15, 2015 may contain the header
-//! `Date: Fri, 15 May 2015 15:34:21 GMT`. Since the timestamp does not
-//! contain any timezone or leap second information it is equvivalent to
-//! writing 1431696861 Unix time.
-//!
-//! This crate provides two public functions:
-//!
-//! * `parse` to parse an HTTP datetime string to a unix timestamp
-//! * `format` to format a unix timestamp to a IMF-fixdate
+#![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 
@@ -407,56 +396,86 @@ mod test {
     use proptest::prelude::*;
     use crate::*;
 
-
-    #[cfg(test)]
-    #[test]
-    fn test_format_static() {
-        let mut buffer = [0u8; 29];
-
-        let tests = [
-            (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
-            (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
-        ];
-
-        for (timestamp, formatted) in tests {
-            assert!(format(timestamp, &mut buffer).is_ok(), "{timestamp} formats successfully");
-            assert_eq!(&buffer, formatted.as_bytes(), "{timestamp} formats as {formatted}");
-        }
-    }
-
-
     #[test]
     fn test_parse_static() {
         let success = [
-            (784111777, "Sun, 06 Nov 1994 08:49:37 GMT"),
+            // Same day, different formats to parse
             (784111777, "Sunday, 06-Nov-94 08:49:37 GMT"),
             (784111777, "Sun Nov  6 08:49:37 1994"),
+            (784111777, "Sun, 06 Nov 1994 08:49:37 GMT"),
+
+            // Random additional day to test
             (1475419451, "Sun, 02 Oct 2016 14:44:11 GMT"),
+
+            // Yes, the world ends on a Friday. I checked. Kinda funny really. I would have expected a Monday.
+            (253402300799, "Fri, 31 Dec 9999 23:59:59 GMT"),
+
+            (0, "Thu, 01 Jan 1970 00:00:00 GMT"), // The epoch
+            (1, "Thu, 01 Jan 1970 00:00:01 GMT"), // The second after the epoch
+
+            (68169599, "Mon, 28 Feb 1972 23:59:59 GMT"), // The second before the first leap year after the epoch
+            (68169600, "Tue, 29 Feb 1972 00:00:00 GMT"), // The second of the first leap year
+            (68169601, "Tue, 29 Feb 1972 00:00:01 GMT"), // The second after the first leap year
+            (68255999, "Tue, 29 Feb 1972 23:59:59 GMT"), // The last second of the first leap year
+            (68256000, "Wed, 01 Mar 1972 00:00:00 GMT"), // The first second of the day after the first leap year
+            (68256001, "Wed, 01 Mar 1972 00:00:01 GMT"), // The second second of the day after the first leap year
+
+            // Ditto above, but for the second leap year after the epoch
+            (194399999, "Sat, 28 Feb 1976 23:59:59 GMT"),
+            (194400000, "Sun, 29 Feb 1976 00:00:00 GMT"),
+            (194400001, "Sun, 29 Feb 1976 00:00:01 GMT"),
+            (194486399, "Sun, 29 Feb 1976 23:59:59 GMT"),
+            (194486400, "Mon, 01 Mar 1976 00:00:00 GMT"),
+            (194486401, "Mon, 01 Mar 1976 00:00:01 GMT"),
+
+            // 2000 would be a leap year, but since it's a multiple of 100 it's not.
+            // Except that it's a multiple of 400 too, so it is.
+            // Sounds like a good thing to test.
+            (951782399, "Mon, 28 Feb 2000 23:59:59 GMT"), // Second before the not-leap-year-but-actually-leap-year
+            (951782400, "Tue, 29 Feb 2000 00:00:00 GMT"), // Second of the not-leap-year-but-actually-leap-year
+            (951782401, "Tue, 29 Feb 2000 00:00:01 GMT"), // Second after the not-leap-year-but-actually-leap-year, just for good measure. You can't hide from me evil bugs!
         ];
-        for (timestamp, formatted) in success {
-            assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "{timestamp} is the parse of {formatted}");
+
+        let mut buffer = [0u8; 29];
+        for (index, (timestamp, formatted)) in success.into_iter().enumerate() {
+            assert_eq!(parse(formatted.as_bytes()), Ok(timestamp), "{formatted} parses as {timestamp}");
+
+            // Format always fromats to IMF, but the first two test cases are a different format
+            if index >= 2 {
+                assert!(format(timestamp, &mut buffer).is_ok(), "{timestamp} formats successfully");
+                assert_eq!(&buffer, formatted.as_bytes(), "{timestamp} formats as {formatted}");
+            }
         }
 
+
         let fail = [
-            "Sun Nov 10 08:00:00 1000",
-            "Sun Nov 10 08*00:00 2000",
-            "Sunday, 06-Nov-94 08+49:37 GMT",
+            "Sat, 01 Jan 10000 00:00:00", // First second that can't be represented in true IMF format
+            "Wed, 31 Dec 1969 00:00:00 GMT", // day before the epoch
+            "Wed, 31 Dec 1969 23:59:59 GMT", // one second before the epoch
+            "Sun Nov 10 08:00:00 1000", // Far too long before the epoch. Time probably didn't exist back then.
+            "Sun Nov 10 08*00:00 2000", // Invalid character
+            "Sunday, 06-Nov-94 08+49:37 GMT", // Invalid character
+            ".Sun, 06 Nov 1994 08:49:37 GMT", // Leading invalid character
+            "Sun, 06 Nov 1994 08:49:37 GMT.", // Trailing invalid character
         ];
+
         for formatted in fail {
             assert_eq!(parse(formatted.as_bytes()), Err(ParseError), "{formatted} fails to parse");
         }
 
+
         let rolling = [
             (0, "Thu, 01 Jan 1970 00:00:00 GMT"),
-            (3600, "Thu, 01 Jan 1970 01:00:00 GMT"),
-            (86400, "Fri, 02 Jan 1970 01:00:00 GMT"),
-            (2592000, "Sun, 01 Feb 1970 01:00:00 GMT"),
-            (2592000, "Tue, 03 Mar 1970 01:00:00 GMT"),
-            (31536005, "Wed, 03 Mar 1971 01:00:05 GMT"),
-            (15552000, "Mon, 30 Aug 1971 01:00:05 GMT"),
-            (6048000, "Mon, 08 Nov 1971 01:00:05 GMT"),
-            (864000000, "Fri, 26 Mar 1999 01:00:05 GMT"),
+            (3600, "Thu, 01 Jan 1970 01:00:00 GMT"), // Add one hour
+            (86400, "Fri, 02 Jan 1970 01:00:00 GMT"), // Add one day
+            (2592000, "Sun, 01 Feb 1970 01:00:00 GMT"), // Add 30 days
+            (2592000, "Tue, 03 Mar 1970 01:00:00 GMT"), // Add 30 days again (this tests February has 28 days in 1970, which was not a leap year)
+            (31536005, "Wed, 03 Mar 1971 01:00:05 GMT"), // Add 365 days + 5 seconds
+            (15552000, "Mon, 30 Aug 1971 01:00:05 GMT"), // Add 180 days
+            (6048000, "Mon, 08 Nov 1971 01:00:05 GMT"), // Add 70 days
+            (864000000, "Fri, 26 Mar 1999 01:00:05 GMT"), // Add 10,000 days
         ];
+
         let mut timestamp = 0;
         for (add_amount, formatted) in rolling {
             timestamp += add_amount;
@@ -527,6 +546,13 @@ mod test {
 
             let parsed_timestamp = parse(&buffer).unwrap();
             assert_eq!(timestamp, parsed_timestamp);
+        }
+
+        #[test]
+        fn test_invalid_bits(bits in prop::array::uniform29(0u8..)) {
+            // This test assumes that the chances of actually generating a random
+            // but valid bit pattern across 29 bytes is effectively impossible.
+            assert!(parse(&bits).is_err());
         }
     }
 }

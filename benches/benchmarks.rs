@@ -37,13 +37,12 @@ impl std::fmt::Write for BlackBoxWrite {
 }
 
 pub fn encode_date(c: &mut Criterion) {
+    let time = 1691891847;
+    let mut buffer = [0u8; 29];
     c.bench_function("encode_date", |b| {
-        let d = "Wed, 21 Oct 2015 07:28:00 GMT";
-        black_box(date_header::parse(d.as_bytes())).unwrap();
         b.iter(|| {
-            use std::fmt::Write;
-            let _ = write!(BlackBoxWrite, "{}", d);
-        })
+            black_box(date_header::format(time, &mut buffer));
+        });
     });
 }
 
