@@ -1,6 +1,6 @@
 [package]
 name = "date_header"
-version = "1.0.3"
+version = "1.0.4"
 authors = ["Jayshua Nelson <me@jayshuanelson.com>"]
 license = "MIT/Apache-2.0"
 description = "Parsing and formatting for the HTTP Date: header"

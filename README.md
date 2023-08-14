@@ -1,6 +1,5 @@
 # Parsing and formatting for the HTTP Date: header
 
-[![Build Status](https://travis-ci.org/jayshua/date_header.svg?branch=master)](https://travis-ci.org/jayshua/date_header)
 [![Crates.io](https://img.shields.io/crates/v/date_header.svg)](https://crates.io/crates/date_header)
 [![Documentation](https://docs.rs/date_header/badge.svg)](https://docs.rs/date_header)
 
