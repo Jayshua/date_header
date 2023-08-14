@@ -199,7 +199,13 @@ pub fn parse(header: &[u8]) -> Result<u64, InvalidDate> {
 
     let timestamp = date.sec as u64 + date.min as u64 * 60 + date.hour as u64 * 3600 + days * 86400;
 
-    Ok(timestamp)
+    let expected_weekday = ((timestamp / 86400 + 4) % 7) as u8;
+
+    if expected_weekday != date.weekday {
+        Err(InvalidDate)
+    } else {
+        Ok(timestamp)
+    }
 }
 
 /// Error returned from [parse] indicating that the input text was not valid.
@@ -222,6 +228,7 @@ struct HttpDate {
     day: u8, // 1...31
     mon: u8, // 1...12
     year: u16, // 1970...9999
+    weekday: u8, // 0...6
 }
 
 
@@ -284,6 +291,16 @@ fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, InvalidDate> {
             b" Dec " => 12,
             _ => return Err(InvalidDate),
         },
+        weekday: match &s[..5] {
+            b"Sun, " => 0,
+            b"Mon, " => 1,
+            b"Tue, " => 2,
+            b"Wed, " => 3,
+            b"Thu, " => 4,
+            b"Fri, " => 5,
+            b"Sat, " => 6,
+            _ => return Err(InvalidDate),
+        },
         year: toint_4(&s[12..16])?,
     };
 
@@ -296,22 +313,15 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, InvalidDate> {
         return Err(InvalidDate);
     }
 
-    fn wday<'a>(s: &'a [u8], name: &'static [u8]) -> Option<&'a [u8]> {
-        if &s[0..name.len()] == name {
-            return Some(&s[name.len()..]);
-        }
-
-        None
-    }
-
-    let s = wday(s, b"Monday, ")
-        .or_else(|| wday(s, b"Tuesday, "))
-        .or_else(|| wday(s, b"Wednesday, "))
-        .or_else(|| wday(s, b"Thursday, "))
-        .or_else(|| wday(s, b"Friday, "))
-        .or_else(|| wday(s, b"Saturday, "))
-        .or_else(|| wday(s, b"Sunday, "))
-        .ok_or(InvalidDate)?;
+    let (s, weekday) =
+        if s.starts_with(b"Sunday, ") { (&s[8..], 0) }
+        else if s.starts_with(b"Monday, ") { (&s[8..], 1) }
+        else if s.starts_with(b"Tuesday, ") { (&s[9..], 2) }
+        else if s.starts_with(b"Wednesday, ") { (&s[11..], 3) }
+        else if s.starts_with(b"Thursday, ") { (&s[10..], 4) }
+        else if s.starts_with(b"Friday, ") { (&s[8..], 5) }
+        else if s.starts_with(b"Saturday, ") { (&s[10..], 6) }
+        else { return Err(InvalidDate); };
 
     if s.len() != 22 || s[12] != b':' || s[15] != b':' || &s[18..22] != b" GMT" {
         return Err(InvalidDate);
@@ -345,6 +355,7 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, InvalidDate> {
             _ => return Err(InvalidDate),
         },
         year,
+        weekday,
     };
 
     Ok(date)
@@ -386,6 +397,16 @@ fn parse_asctime(s: &[u8]) -> Result<HttpDate, InvalidDate> {
             _ => return Err(InvalidDate),
         },
         year: toint_4(&s[20..24])?,
+        weekday: match &s[0..4] {
+            b"Sun " => 0,
+            b"Mon " => 1,
+            b"Tue " => 2,
+            b"Wed " => 3,
+            b"Thu " => 4,
+            b"Fri " => 5,
+            b"Sat " => 6,
+            _ => return Err(InvalidDate),
+        },
     };
 
     Ok(date)
@@ -460,6 +481,12 @@ mod test {
             "Sunday, 06-Nov-94 08+49:37 GMT", // Invalid character
             ".Sun, 06 Nov 1994 08:49:37 GMT", // Leading invalid character
             "Sun, 06 Nov 1994 08:49:37 GMT.", // Trailing invalid character
+            "Mon, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
+            "Tue, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
+            "Wed, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
+            "Thu, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
+            "Fri, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
+            "Sat, 02 Oct 2016 14:44:11 GMT", // Invalid weekday, was actually a Sunday
         ];
 
         for formatted in fail {
@@ -490,7 +517,6 @@ mod test {
     proptest! {
         #[test]
         fn test_imf_parse(
-            week_day in "(Sun|Mon|Tue|Wed|Thu|Fri|Sat)",
             day in 1..=31,
             month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
             year in 1970..=9999,
@@ -498,15 +524,23 @@ mod test {
             minute in 0..=59,
             second in 0..=59,
         ) {
-            let text = format!("{}, {:0>2} {} {} {:0>2}:{:0>2}:{:0>2} GMT", week_day, day, month, year, hour, minute, second);
-            let result = parse(text.as_bytes());
-            assert!(result.is_ok());
-            assert!(result.unwrap() < YEAR_10000);
+            let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+            let parse_results: Vec<_> = weekdays
+                .into_iter()
+                .map(|weekday| format!("{}, {:0>2} {} {} {:0>2}:{:0>2}:{:0>2} GMT", weekday, day, month, year, hour, minute, second))
+                .map(|text| parse(text.as_bytes()))
+                .collect();
+
+            // Exactly one valid weekday parse
+            assert_eq!(parse_results.iter().filter(|x| x.is_ok()).count(), 1, "{:?}", parse_results);
+
+            // The parsed result is less than the maximum valid year
+            assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
 
         #[test]
         fn test_rfc850_parse(
-            week_day in "(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)",
             day in 1..=31,
             month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
             year in 70..=99,
@@ -514,16 +548,24 @@ mod test {
             minute in 0..=59,
             second in 0..=59,
         ) {
-            let text = format!("{}, {:0>2}-{}-{:0>2} {:0>2}:{:0>2}:{:0>2} GMT", week_day, day, month, year, hour, minute, second);
-            let result = parse(text.as_bytes());
-            assert!(result.is_ok());
-            assert!(result.unwrap() < YEAR_10000);
+            let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+            let parse_results: Vec<_> = weekdays
+                .into_iter()
+                .map(|weekday| format!("{}, {:0>2}-{}-{:0>2} {:0>2}:{:0>2}:{:0>2} GMT", weekday, day, month, year, hour, minute, second))
+                .map(|text| parse(text.as_bytes()))
+                .collect();
+
+            // Exactly one valid weekday parse
+            assert_eq!(parse_results.iter().filter(|x| x.is_ok()).count(), 1, "{:?}", parse_results);
+
+            // The parsed result is less than the maximum valid year
+            assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
 
         #[test]
         // Example: `Sun Nov  6 08:49:37 1994`
         fn test_asc_parse(
-            week_day in "(Sun|Mon|Tue|Wed|Thu|Fri|Sat)",
             month in "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
             day in 1..=31,
             year in 1970..=9999,
@@ -531,10 +573,19 @@ mod test {
             minute in 0..=59,
             second in 0..=59,
         ) {
-            let text = format!("{} {} {: >2} {:0>2}:{:0>2}:{:0>2} {}", week_day, month, day, hour, minute, second, year);
-            let result = parse(text.as_bytes());
-            assert!(result.is_ok());
-            assert!(result.unwrap() < YEAR_10000);
+            let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+            let parse_results: Vec<_> = weekdays
+                .into_iter()
+                .map(|weekday| format!("{} {} {: >2} {:0>2}:{:0>2}:{:0>2} {}", weekday, month, day, hour, minute, second, year))
+                .map(|text| parse(text.as_bytes()))
+                .collect();
+
+            // Exactly one valid weekday parse
+            assert_eq!(parse_results.iter().filter(|x| x.is_ok()).count(), 1, "{:?}", parse_results);
+
+            // The parsed result is less than the maximum valid year
+            assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
 
         #[test]
