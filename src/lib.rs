@@ -18,6 +18,12 @@ const YEAR_10000: u64 = 253402300800;
 ///
 /// Since this is a fixed-width format, it does not support dates greater
 /// than year 9999.
+///
+/// ```rust
+/// let mut header = [0u8; 29];
+/// assert_eq!(Ok(()), date_header::format(1431704061, &mut header));
+/// assert_eq!(&header, b"Fri, 15 May 2015 15:34:21 GMT");
+/// ```
 pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), TooFuturistic> {
     if secs_since_epoch >= YEAR_10000 {
         return Err(TooFuturistic);
@@ -147,10 +153,13 @@ pub struct TooFuturistic;
 
 /// Parse an HTTP date header into a u64 unix timestamp
 ///
-/// Note that this function ignores the portion of the formatted text corresponding to the day of the week.
-/// e.g. the "Sun" in "Sun, 02 Oct 2016 14:44:11 GMT". This is usually fine because the week day is redundant
-/// information - the date is fully specified by the day-month-year components. A different crate will be
-/// needed if you want to fully validate the date format.
+/// This will parse IMF-fixdate, RFC850 dates, and asctime dates.
+/// See [RFC9110](https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7) for more information.
+///
+/// ```rust
+/// let header = b"Fri, 15 May 2015 15:34:21 GMT";
+/// assert_eq!(Ok(1431704061), date_header::parse(header));
+/// ```
 pub fn parse(header: &[u8]) -> Result<u64, InvalidDate> {
     let date = parse_imf_fixdate(header)
         .or_else(|_| parse_rfc850_date(header))
