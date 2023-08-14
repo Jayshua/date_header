@@ -3,8 +3,12 @@
 #![cfg_attr(not(test), no_std)]
 
 
+
+
 // Unix timestamp for Jan 1st, 10000
 const YEAR_10000: u64 = 253402300800;
+
+
 
 
 /// Format a unix timestamp to be used in an HTTP header field into the provided buffer.
@@ -122,12 +126,12 @@ pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), TooFut
     buffer[13] = b'0' + (year / 100 % 10) as u8;
     buffer[14] = b'0' + (year / 10 % 10) as u8;
     buffer[15] = b'0' + (year % 10) as u8;
-    buffer[17] = b'0' + (hour / 10) as u8;
-    buffer[18] = b'0' + (hour % 10) as u8;
-    buffer[20] = b'0' + (min / 10) as u8;
-    buffer[21] = b'0' + (min % 10) as u8;
-    buffer[23] = b'0' + (sec / 10) as u8;
-    buffer[24] = b'0' + (sec % 10) as u8;
+    buffer[17] = b'0' + (hour / 10);
+    buffer[18] = b'0' + (hour % 10);
+    buffer[20] = b'0' + (min / 10);
+    buffer[21] = b'0' + (min % 10);
+    buffer[23] = b'0' + (sec / 10);
+    buffer[24] = b'0' + (sec % 10);
 
     Ok(())
 }
@@ -137,9 +141,6 @@ pub fn format(secs_since_epoch: u64, buffer: &mut [u8; 29]) -> Result<(), TooFut
 /// IMF-fixdate only supports days prior to the year 10000
 #[derive(Debug, Eq, PartialEq)]
 pub struct TooFuturistic;
-
-
-
 
 
 
@@ -208,62 +209,13 @@ pub fn parse(header: &[u8]) -> Result<u64, InvalidDate> {
     }
 }
 
+
 /// Error returned from [parse] indicating that the input text was not valid.
 #[derive(Debug, Eq, PartialEq)]
 pub struct InvalidDate;
 
 
 
-
-
-
-
-
-
-#[derive(Debug, Copy, Clone)]
-struct HttpDate {
-    sec: u8, // 0...59
-    min: u8, // 0...59
-    hour: u8, // 0...23
-    day: u8, // 1...31
-    mon: u8, // 1...12
-    year: u16, // 1970...9999
-    weekday: u8, // 0...6
-}
-
-
-fn toint_1(x: u8) -> Result<u8, InvalidDate> {
-    let result = x.wrapping_sub(b'0');
-    if result < 10 {
-        Ok(result)
-    } else {
-        Err(InvalidDate)
-    }
-}
-
-fn toint_2(s: &[u8]) -> Result<u8, InvalidDate> {
-    let high = s[0].wrapping_sub(b'0');
-    let low = s[1].wrapping_sub(b'0');
-
-    if high < 10 && low < 10 {
-        Ok(high * 10 + low)
-    } else {
-        Err(InvalidDate)
-    }
-}
-
-fn toint_4(s: &[u8]) -> Result<u16, InvalidDate> {
-    let a = u16::from(s[0].wrapping_sub(b'0'));
-    let b = u16::from(s[1].wrapping_sub(b'0'));
-    let c = u16::from(s[2].wrapping_sub(b'0'));
-    let d = u16::from(s[3].wrapping_sub(b'0'));
-
-    if a < 10 && b < 10 && c < 10 && d < 10 {
-        Ok(a * 1000 + b * 100 + c * 10 + d)
-    } else {
-        Err(InvalidDate)
-    }
-}
 
 // Example: `Sun, 06 Nov 1994 08:49:37 GMT`
 fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, InvalidDate> {
@@ -306,6 +258,7 @@ fn parse_imf_fixdate(s: &[u8]) -> Result<HttpDate, InvalidDate> {
 
     Ok(date)
 }
+
 
 // Example: `Sunday, 06-Nov-94 08:49:37 GMT`
 fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, InvalidDate> {
@@ -361,6 +314,7 @@ fn parse_rfc850_date(s: &[u8]) -> Result<HttpDate, InvalidDate> {
     Ok(date)
 }
 
+
 // Example: `Sun Nov  6 08:49:37 1994`
 fn parse_asctime(s: &[u8]) -> Result<HttpDate, InvalidDate> {
     if s.len() != 24 || s[10] != b' ' || s[13] != b':' || s[16] != b':' || s[19] != b' ' {
@@ -413,12 +367,62 @@ fn parse_asctime(s: &[u8]) -> Result<HttpDate, InvalidDate> {
 }
 
 
+#[derive(Debug, Copy, Clone)]
+struct HttpDate {
+    sec: u8, // 0...59
+    min: u8, // 0...59
+    hour: u8, // 0...23
+    day: u8, // 1...31
+    mon: u8, // 1...12
+    year: u16, // 1970...9999
+    weekday: u8, // 0...6
+}
+
+
+fn toint_1(x: u8) -> Result<u8, InvalidDate> {
+    let result = x.wrapping_sub(b'0');
+    if result < 10 {
+        Ok(result)
+    } else {
+        Err(InvalidDate)
+    }
+}
+
+
+fn toint_2(s: &[u8]) -> Result<u8, InvalidDate> {
+    let high = s[0].wrapping_sub(b'0');
+    let low = s[1].wrapping_sub(b'0');
+
+    if high < 10 && low < 10 {
+        Ok(high * 10 + low)
+    } else {
+        Err(InvalidDate)
+    }
+}
+
+
+fn toint_4(s: &[u8]) -> Result<u16, InvalidDate> {
+    let a = u16::from(s[0].wrapping_sub(b'0'));
+    let b = u16::from(s[1].wrapping_sub(b'0'));
+    let c = u16::from(s[2].wrapping_sub(b'0'));
+    let d = u16::from(s[3].wrapping_sub(b'0'));
+
+    if a < 10 && b < 10 && c < 10 && d < 10 {
+        Ok(a * 1000 + b * 100 + c * 10 + d)
+    } else {
+        Err(InvalidDate)
+    }
+}
+
+
 
 
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
     use crate::*;
+
+
 
     #[test]
     fn test_parse_static() {
@@ -514,6 +518,7 @@ mod test {
     }
 
 
+
     proptest! {
         #[test]
         fn test_imf_parse(
@@ -539,6 +544,7 @@ mod test {
             assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
 
+
         #[test]
         fn test_rfc850_parse(
             day in 1..=31,
@@ -562,6 +568,7 @@ mod test {
             // The parsed result is less than the maximum valid year
             assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
+
 
         #[test]
         // Example: `Sun Nov  6 08:49:37 1994`
@@ -588,6 +595,7 @@ mod test {
             assert!(parse_results.into_iter().find_map(|x| x.ok()).unwrap() < YEAR_10000);
         }
 
+
         #[test]
         fn test_format_props(timestamp in 0..YEAR_10000) {
             let regex = regex::Regex::new(r"(Sun|Mon|Tue|Wed|Thu|Fri|Sat), [0-3]\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (19[7-9]\d|[2-9]\d{3}) ([0-2]\d):([0-5]\d):([0-5]\d) GMT")
@@ -601,6 +609,7 @@ mod test {
             let parsed_timestamp = parse(&buffer).unwrap();
             assert_eq!(timestamp, parsed_timestamp);
         }
+
 
         #[test]
         fn test_invalid_bits(bits in prop::array::uniform29(0u8..)) {

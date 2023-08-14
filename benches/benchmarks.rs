@@ -41,7 +41,7 @@ pub fn encode_date(c: &mut Criterion) {
     let mut buffer = [0u8; 29];
     c.bench_function("encode_date", |b| {
         b.iter(|| {
-            black_box(date_header::format(time, &mut buffer));
+            black_box(date_header::format(time, &mut buffer)).unwrap();
         });
     });
 }
